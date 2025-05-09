@@ -31,6 +31,7 @@ const getAdditionalDependencies = (
   tools?: Tool[],
   templateType?: TemplateType,
   observability?: TemplateObservability,
+  // eslint-disable-next-line max-params
 ) => {
   const dependencies: Dependency[] = [];
 
@@ -562,7 +563,7 @@ const installLlamaIndexServerTemplate = async ({
     process.exit(1);
   }
 
-  await copy("workflow.py", path.join(root, "app"), {
+  await copy("*.py", path.join(root, "app"), {
     parents: true,
     cwd: path.join(templatesDir, "components", "workflows", "python", useCase),
   });

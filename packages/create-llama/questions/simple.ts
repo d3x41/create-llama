@@ -6,7 +6,11 @@ import { ModelConfig, TemplateFramework } from "../helpers/types";
 import { PureQuestionArgs, QuestionResults } from "./types";
 import { askPostInstallAction, questionHandlers } from "./utils";
 
-type AppType = "agentic_rag" | "financial_report" | "deep_research";
+type AppType =
+  | "agentic_rag"
+  | "financial_report"
+  | "deep_research"
+  | "artifacts";
 
 type SimpleAnswers = {
   appType: AppType;
@@ -42,6 +46,12 @@ export const askSimpleQuestions = async (
           description:
             "Researches and analyzes provided documents from multiple perspectives, generating a comprehensive report with citations to support key findings and insights.",
         },
+        {
+          title: "Artifacts",
+          value: "artifacts",
+          description:
+            "Build your own Vercel's v0 or OpenAI's canvas-styled UI.",
+        },
       ],
     },
     questionHandlers,
@@ -52,21 +62,19 @@ export const askSimpleQuestions = async (
 
   let useLlamaCloud = false;
 
-  if (appType !== "extractor" && appType !== "contract_review") {
-    const { language: newLanguage } = await prompts(
-      {
-        type: "select",
-        name: "language",
-        message: "What language do you want to use?",
-        choices: [
-          { title: "Python (FastAPI)", value: "fastapi" },
-          { title: "Typescript (NextJS)", value: "nextjs" },
-        ],
-      },
-      questionHandlers,
-    );
-    language = newLanguage;
-  }
+  const { language: newLanguage } = await prompts(
+    {
+      type: "select",
+      name: "language",
+      message: "What language do you want to use?",
+      choices: [
+        { title: "Python (FastAPI)", value: "fastapi" },
+        { title: "Typescript (NextJS)", value: "nextjs" },
+      ],
+    },
+    questionHandlers,
+  );
+  language = newLanguage;
 
   const { useLlamaCloud: newUseLlamaCloud } = await prompts(
     {
@@ -111,10 +119,10 @@ const convertAnswers = async (
   args: PureQuestionArgs,
   answers: SimpleAnswers,
 ): Promise<QuestionResults> => {
-  const MODEL_GPT4o: ModelConfig = {
+  const MODEL_GPT41: ModelConfig = {
     provider: "openai",
     apiKey: args.openAiKey,
-    model: "gpt-4o",
+    model: "gpt-4.1",
     embeddingModel: "text-embedding-3-large",
     dimensions: 1536,
     isConfigured(): boolean {
@@ -135,13 +143,19 @@ const convertAnswers = async (
       template: "llamaindexserver",
       dataSources: EXAMPLE_10K_SEC_FILES,
       tools: getTools(["interpreter", "document_generator"]),
-      modelConfig: MODEL_GPT4o,
+      modelConfig: MODEL_GPT41,
     },
     deep_research: {
       template: "llamaindexserver",
       dataSources: EXAMPLE_10K_SEC_FILES,
       tools: [],
-      modelConfig: MODEL_GPT4o,
+      modelConfig: MODEL_GPT41,
+    },
+    artifacts: {
+      template: "llamaindexserver",
+      dataSources: [],
+      tools: [],
+      modelConfig: MODEL_GPT41,
     },
   };
 
