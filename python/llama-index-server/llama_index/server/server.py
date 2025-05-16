@@ -5,12 +5,18 @@ from typing import Any, Callable, Optional, Union
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import Mount
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
 from llama_index.core.workflow import Workflow
-from llama_index.server.api.routers import chat_router, custom_components_router
+from llama_index.server.api.routers import (
+    chat_router,
+    custom_components_router,
+    dev_router,
+)
 from llama_index.server.chat_ui import download_chat_ui
 from llama_index.server.settings import server_settings
-from pydantic import BaseModel, Field
 
 
 class UIConfig(BaseModel):
@@ -31,6 +37,9 @@ class UIConfig(BaseModel):
     component_dir: Optional[str] = Field(
         default=None, description="The directory to custom UI components code"
     )
+    dev_mode: bool = Field(
+        default=False, description="Whether to enable the UI dev mode"
+    )
 
     def get_config_content(self) -> str:
         return json.dumps(
@@ -44,6 +53,7 @@ class UIConfig(BaseModel):
                 "COMPONENTS_API": f"{server_settings.api_url}/components"
                 if self.component_dir
                 else None,
+                "DEV_MODE": self.dev_mode,
             },
             indent=2,
         )
@@ -98,24 +108,33 @@ class LlamaIndexServer(FastAPI):
             server_settings.set_url(server_url)
         if api_prefix:
             server_settings.set_api_prefix(api_prefix)
-
-        if self.use_default_routers:
-            self.add_default_routers()
+        server_settings.set_workflow_factory(workflow_factory.__name__)
 
         if str(env).lower() == "dev":
             self.allow_cors("*")
             if self.ui_config.enabled is None:
                 self.ui_config.enabled = True
-
+        else:
+            if self.ui_config.enabled and self.ui_config.dev_mode:
+                raise ValueError(
+                    "UI dev mode requires the environment variable for LlamaIndexServer to be set to 'dev' and start the FastAPI app in dev mode."
+                )
         if self.ui_config.enabled is None:
             self.ui_config.enabled = False
 
+        # Routers
+        if self.use_default_routers:
+            self.add_default_routers()
+
+        # Should mount ui at the end
         if self.ui_config.enabled:
             self.mount_ui()
 
     # Default routers
     def add_default_routers(self) -> None:
         self.add_chat_router()
+        if self.ui_config.enabled and self.ui_config.dev_mode:
+            self.include_router(dev_router(), prefix=server_settings.api_prefix)
         self.mount_data_dir()
         self.mount_output_dir()
 
@@ -162,7 +181,10 @@ class LlamaIndexServer(FastAPI):
                 )
                 download_chat_ui(logger=self.logger, target_path=self.ui_config.ui_path)
             self._mount_static_files(
-                directory=self.ui_config.ui_path, path="/", html=True
+                directory=self.ui_config.ui_path,
+                path="/",
+                html=True,
+                name=self.ui_config.ui_path,
             )
             self._override_ui_config()
 
@@ -204,7 +226,11 @@ class LlamaIndexServer(FastAPI):
         )
 
     def _mount_static_files(
-        self, directory: str, path: str, html: bool = False
+        self,
+        directory: str,
+        path: str,
+        html: bool = False,
+        name: Optional[str] = None,
     ) -> None:
         """
         Mount static files from a directory if it exists.
@@ -214,7 +240,7 @@ class LlamaIndexServer(FastAPI):
             self.mount(
                 path,
                 StaticFiles(directory=directory, check_dir=False, html=html),
-                name=f"{directory}-static",
+                name=name or f"{directory}-static",
             )
 
     def allow_cors(self, origin: str = "*") -> None:
@@ -228,3 +254,19 @@ class LlamaIndexServer(FastAPI):
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+    def add_api_route(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Add an API route to the server.
+        """
+        # Because static files are mounted at the root path by default,
+        # we need to place them at the end of the routes list.
+        ui_route = None
+        for route in self.routes:
+            if isinstance(route, Mount):
+                if route.name == self.ui_config.ui_path:
+                    ui_route = route
+                    self.routes.remove(route)
+        super().add_api_route(*args, **kwargs)
+        if ui_route:
+            self.mount(ui_route.path, ui_route.app, name=ui_route.name)
