@@ -1,4 +1,3 @@
-/* eslint-disable import/no-extraneous-dependencies */
 import { execSync } from "child_process";
 import { Command } from "commander";
 import fs from "fs";
@@ -197,7 +196,7 @@ const program = new Command(packageJson.name)
     "--pro",
     `
 
-  Allow interactive selection of all features.
+  Deprecated: Allow interactive selection of all features.
 `,
     false,
   )

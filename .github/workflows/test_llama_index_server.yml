@@ -4,8 +4,8 @@ on:
   pull_request:
 
 env:
-  POETRY_VERSION: "1.8.3"
   PYTHON_VERSION: "3.9"
+  UI_TEST: "true"
 
 jobs:
   unit-test:
@@ -20,30 +20,31 @@ jobs:
         python-version: ["3.9"]
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
 
-      - name: Install Poetry
-        run: pipx install poetry==${{ env.POETRY_VERSION }}
-
-      - name: Set up python ${{ matrix.python-version }}
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: "poetry"
 
-      - name: Configure Poetry
-        run: |
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-          poetry env use python
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
 
       - name: Install dependencies
         shell: bash
-        run: poetry install --with dev
+        run: pnpm install && pnpm build
 
       - name: Run unit tests
         shell: bash
-        run: |
-          poetry run pytest tests
+        run: uv run pytest tests
 
   type-check:
     name: Type Check
@@ -53,29 +54,24 @@ jobs:
         working-directory: python/llama-index-server
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
 
-      - name: Install Poetry
-        run: pipx install poetry==${{ env.POETRY_VERSION }}
-
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "poetry"
 
-      - name: Configure Poetry
-        run: |
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-          poetry env use python
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Install dependencies
-        shell: bash
-        run: poetry install --with dev
+        run: pnpm install
 
       - name: Run mypy
         shell: bash
-        run: poetry run mypy llama_index
+        run: uv run mypy llama_index
 
   build:
     needs: [unit-test, type-check]
@@ -85,27 +81,56 @@ jobs:
         working-directory: python/llama-index-server
     steps:
       - uses: actions/checkout@v4
-      - name: Install Poetry
-        run: pipx install poetry==${{ env.POETRY_VERSION }}
+      - uses: pnpm/action-setup@v3
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Clear python cache
-        shell: bash
-        run: poetry cache clear --all pypi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install && pnpm build
+
       - name: Build package
         shell: bash
-        run: poetry build
-      - name: Test installing built package
+        run: uv build
+
+      - name: Get the absolute wheel file path and save it to the output
         shell: bash
-        run: python -m pip install .
+        id: get_whl_path
+        run: |
+          WHL_FILE=$(readlink -f dist/*.whl)
+          echo "whl_file=$WHL_FILE" >> $GITHUB_OUTPUT
+
       - name: Test import
         shell: bash
-        working-directory: ${{ vars.RUNNER_TEMP }}
-        run: python -c "from llama_index.server import LlamaIndexServer"
+        working-directory: ${{ github.workspace }}
+        env:
+          WHL_FILE: ${{ steps.get_whl_path.outputs.whl_file }}
+        run: |
+          uv run --with $WHL_FILE python -c "from llama_index.server import LlamaIndexServer"
+
+      - name: Check frontend resources is present
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          WHL_FILE: ${{ steps.get_whl_path.outputs.whl_file }}
+        run: |
+          uv run --with $WHL_FILE python -c "from llama_index.server.chat_ui import check_ui_resources; check_ui_resources()"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: llama-index-server
-          path: python/llama-index-server/dist/
+          path: dist/

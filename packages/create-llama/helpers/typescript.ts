@@ -31,23 +31,30 @@ const installLlamaIndexServerTemplate = async ({
     process.exit(1);
   }
 
-  await copy("workflow.ts", path.join(root, "src", "app"), {
-    parents: true,
+  await copy("**", path.join(root), {
     cwd: path.join(
       templatesDir,
       "components",
-      "workflows",
+      "use-cases",
       "typescript",
       useCase,
     ),
+    rename: assetRelocator,
   });
 
-  // copy workflow UI components to output/components folder
+  // copy workflow UI components to components folder in root
   await copy("*", path.join(root, "components"), {
     parents: true,
-    cwd: path.join(templatesDir, "components", "ui", "workflows", useCase),
+    cwd: path.join(templatesDir, "components", "ui", "use-cases", useCase),
   });
 
+  // copy layout components to layout folder in root
+  await copy("*", path.join(root, "layout"), {
+    parents: true,
+    cwd: path.join(templatesDir, "components", "ui", "layout"),
+  });
+
+  // Override generate.ts if workflow use case doesn't use custom UI
   if (vectorDb === "llamacloud") {
     await copy("generate.ts", path.join(root, "src"), {
       parents: true,
@@ -74,18 +81,14 @@ const installLlamaIndexServerTemplate = async ({
       rename: () => "data.ts",
     });
   }
-  // Copy README.md
-  await copy("README-template.md", path.join(root), {
-    parents: true,
-    cwd: path.join(
-      templatesDir,
-      "components",
-      "workflows",
-      "typescript",
-      useCase,
-    ),
-    rename: assetRelocator,
-  });
+
+  // Simplify use case code
+  if (useCase === "code_generator" || useCase === "document_generator") {
+    // Artifact use case doesn't use index.
+    // We don't need data.ts, generate.ts
+    await fs.rm(path.join(root, "src", "app", "data.ts"));
+    // TODO: Remove generate index in generate.ts and package.json if possible
+  }
 };
 
 const installLegacyTSTemplate = async ({
@@ -390,7 +393,7 @@ const providerDependencies: {
   [key in ModelProvider]?: Record<string, string>;
 } = {
   openai: {
-    "@llamaindex/openai": "^0.2.0",
+    "@llamaindex/openai": "~0.4.0",
   },
   gemini: {
     "@llamaindex/google": "^0.2.0",
@@ -516,7 +519,7 @@ async function updatePackageJson({
   if (backend) {
     packageJson.dependencies = {
       ...packageJson.dependencies,
-      "@llamaindex/readers": "^2.0.0",
+      "@llamaindex/readers": "~3.1.4",
     };
 
     if (vectorDb && vectorDb in vectorDbDependencies) {
@@ -543,6 +546,16 @@ async function updatePackageJson({
     packageJson.devDependencies = {
       ...packageJson.devDependencies,
       "node-loader": "^2.0.0",
+    };
+  }
+
+  // if having custom server package tgz file, use it for testing @llamaindex/server
+  const serverPackagePath = process.env.SERVER_PACKAGE_PATH;
+  if (serverPackagePath && template === "llamaindexserver") {
+    const relativePath = path.relative(process.cwd(), serverPackagePath);
+    packageJson.dependencies = {
+      ...packageJson.dependencies,
+      "@llamaindex/server": `file:${relativePath}`,
     };
   }
 

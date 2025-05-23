@@ -31,6 +31,7 @@ const getAdditionalDependencies = (
   tools?: Tool[],
   templateType?: TemplateType,
   observability?: TemplateObservability,
+  // eslint-disable-next-line max-params
 ) => {
   const dependencies: Dependency[] = [];
 
@@ -92,6 +93,10 @@ const getAdditionalDependencies = (
       dependencies.push({
         name: "llama-index-vector-stores-chroma",
         version: ">=0.4.0,<0.5.0",
+      });
+      dependencies.push({
+        name: "onnxruntime",
+        version: "<1.22.0",
       });
       break;
     }
@@ -262,7 +267,7 @@ const getAdditionalDependencies = (
     if (observability === "traceloop") {
       dependencies.push({
         name: "traceloop-sdk",
-        version: ">=0.15.11,<0.16.0",
+        version: ">=0.15.11",
       });
     }
     if (observability === "llamatrace") {
@@ -562,15 +567,21 @@ const installLlamaIndexServerTemplate = async ({
     process.exit(1);
   }
 
-  await copy("workflow.py", path.join(root, "app"), {
+  await copy("*.py", path.join(root, "app"), {
     parents: true,
-    cwd: path.join(templatesDir, "components", "workflows", "python", useCase),
+    cwd: path.join(templatesDir, "components", "use-cases", "python", useCase),
   });
 
   // Copy custom UI component code
   await copy(`*`, path.join(root, "components"), {
     parents: true,
-    cwd: path.join(templatesDir, "components", "ui", "workflows", useCase),
+    cwd: path.join(templatesDir, "components", "ui", "use-cases", useCase),
+  });
+
+  // Copy layout components to layout folder in root
+  await copy("*", path.join(root, "layout"), {
+    parents: true,
+    cwd: path.join(templatesDir, "components", "ui", "layout"),
   });
 
   if (useLlamaParse) {
@@ -601,7 +612,7 @@ const installLlamaIndexServerTemplate = async ({
   // Copy README.md
   await copy("README-template.md", path.join(root), {
     parents: true,
-    cwd: path.join(templatesDir, "components", "workflows", "python", useCase),
+    cwd: path.join(templatesDir, "components", "use-cases", "python", useCase),
     rename: assetRelocator,
   });
 };
@@ -672,6 +683,7 @@ export const installPythonTemplate = async ({
     dataSources,
     tools,
     template,
+    observability,
   );
 
   await addDependencies(root, addOnDependencies);

@@ -1,27 +1,22 @@
 import logging
 import os
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
+
+from pydantic import BaseModel, field_validator
 
 from llama_index.core.schema import NodeWithScore
 from llama_index.core.types import ChatMessage, MessageRole
 from llama_index.core.workflow import Event
 from llama_index.server.settings import server_settings
-from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger("uvicorn")
-
-
-class ChatConfig(BaseModel):
-    next_question_suggestions: bool = Field(
-        default=True,
-        description="Whether to suggest next questions",
-    )
 
 
 class ChatAPIMessage(BaseModel):
     role: MessageRole
     content: str
+    annotations: Optional[List[Any]] = None
 
     def to_llamaindex_message(self) -> ChatMessage:
         return ChatMessage(role=self.role, content=self.content)
@@ -30,7 +25,6 @@ class ChatAPIMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatAPIMessage]
     data: Optional[Any] = None
-    config: Optional[ChatConfig] = ChatConfig()
 
     @field_validator("messages")
     def validate_messages(cls, v: List[ChatAPIMessage]) -> List[ChatAPIMessage]:
@@ -145,6 +139,57 @@ class ComponentDefinition(BaseModel):
 class UIEvent(Event):
     type: str
     data: BaseModel
+
+    def to_response(self) -> dict:
+        return {
+            "type": self.type,
+            "data": self.data.model_dump(),
+        }
+
+
+class ArtifactType(str, Enum):
+    CODE = "code"
+    DOCUMENT = "document"
+
+
+class CodeArtifactData(BaseModel):
+    file_name: str
+    code: str
+    language: str
+
+
+class DocumentArtifactData(BaseModel):
+    title: str
+    content: str
+    type: Literal["markdown", "html"]
+
+
+class Artifact(BaseModel):
+    created_at: Optional[int] = None
+    type: ArtifactType
+    data: Union[CodeArtifactData, DocumentArtifactData]
+
+    @classmethod
+    def from_message(cls, message: ChatAPIMessage) -> Optional["Artifact"]:
+        if not message.annotations or not isinstance(message.annotations, list):
+            return None
+
+        for annotation in message.annotations:
+            if isinstance(annotation, dict) and annotation.get("type") == "artifact":
+                try:
+                    artifact = cls.model_validate(annotation.get("data"))
+                    return artifact
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to parse artifact from annotation: {annotation}. Error: {e}"
+                    )
+
+        return None
+
+
+class ArtifactEvent(Event):
+    type: str = "artifact"
+    data: Artifact
 
     def to_response(self) -> dict:
         return {
