@@ -1,4 +1,5 @@
 import prompts from "prompts";
+import { NO_DATA_USE_CASES } from "../helpers/constant";
 import { EXAMPLE_10K_SEC_FILES, EXAMPLE_FILE } from "../helpers/datasources";
 import { askModelConfig } from "../helpers/providers";
 import { getTools } from "../helpers/tools";
@@ -6,7 +7,13 @@ import { ModelConfig, TemplateFramework } from "../helpers/types";
 import { PureQuestionArgs, QuestionResults } from "./types";
 import { askPostInstallAction, questionHandlers } from "./utils";
 
-type AppType = "agentic_rag" | "financial_report" | "deep_research";
+type AppType =
+  | "agentic_rag"
+  | "financial_report"
+  | "deep_research"
+  | "code_generator"
+  | "document_generator"
+  | "hitl";
 
 type SimpleAnswers = {
   appType: AppType;
@@ -42,6 +49,22 @@ export const askSimpleQuestions = async (
           description:
             "Researches and analyzes provided documents from multiple perspectives, generating a comprehensive report with citations to support key findings and insights.",
         },
+        {
+          title: "Code Generator",
+          value: "code_generator",
+          description: "Build a Vercel v0 styled code generator.",
+        },
+        {
+          title: "Document Generator",
+          value: "document_generator",
+          description: "Build a OpenAI canvas-styled document generator.",
+        },
+        {
+          title: "Human in the Loop",
+          value: "hitl",
+          description:
+            "Build a CLI command workflow that is reviewed by a human before execution",
+        },
       ],
     },
     questionHandlers,
@@ -52,35 +75,36 @@ export const askSimpleQuestions = async (
 
   let useLlamaCloud = false;
 
-  if (appType !== "extractor" && appType !== "contract_review") {
-    const { language: newLanguage } = await prompts(
-      {
-        type: "select",
-        name: "language",
-        message: "What language do you want to use?",
-        choices: [
-          { title: "Python (FastAPI)", value: "fastapi" },
-          { title: "Typescript (NextJS)", value: "nextjs" },
-        ],
-      },
-      questionHandlers,
-    );
-    language = newLanguage;
-  }
-
-  const { useLlamaCloud: newUseLlamaCloud } = await prompts(
+  const { language: newLanguage } = await prompts(
     {
-      type: "toggle",
-      name: "useLlamaCloud",
-      message: "Do you want to use LlamaCloud services?",
-      initial: false,
-      active: "Yes",
-      inactive: "No",
-      hint: "see https://www.llamaindex.ai/enterprise for more info",
+      type: "select",
+      name: "language",
+      message: "What language do you want to use?",
+      choices: [
+        { title: "Python (FastAPI)", value: "fastapi" },
+        { title: "Typescript (NextJS)", value: "nextjs" },
+      ],
     },
     questionHandlers,
   );
-  useLlamaCloud = newUseLlamaCloud;
+  language = newLanguage;
+
+  const shouldAskLlamaCloud = !NO_DATA_USE_CASES.includes(appType);
+  if (shouldAskLlamaCloud) {
+    const { useLlamaCloud: newUseLlamaCloud } = await prompts(
+      {
+        type: "toggle",
+        name: "useLlamaCloud",
+        message: "Do you want to use LlamaCloud services?",
+        initial: false,
+        active: "Yes",
+        inactive: "No",
+        hint: "see https://www.llamaindex.ai/enterprise for more info",
+      },
+      questionHandlers,
+    );
+    useLlamaCloud = newUseLlamaCloud;
+  }
 
   if (useLlamaCloud && !llamaCloudKey) {
     // Ask for LlamaCloud API key, if not set
@@ -111,10 +135,10 @@ const convertAnswers = async (
   args: PureQuestionArgs,
   answers: SimpleAnswers,
 ): Promise<QuestionResults> => {
-  const MODEL_GPT4o: ModelConfig = {
+  const MODEL_GPT41: ModelConfig = {
     provider: "openai",
     apiKey: args.openAiKey,
-    model: "gpt-4o",
+    model: "gpt-4.1",
     embeddingModel: "text-embedding-3-large",
     dimensions: 1536,
     isConfigured(): boolean {
@@ -135,13 +159,31 @@ const convertAnswers = async (
       template: "llamaindexserver",
       dataSources: EXAMPLE_10K_SEC_FILES,
       tools: getTools(["interpreter", "document_generator"]),
-      modelConfig: MODEL_GPT4o,
+      modelConfig: MODEL_GPT41,
     },
     deep_research: {
       template: "llamaindexserver",
       dataSources: EXAMPLE_10K_SEC_FILES,
       tools: [],
-      modelConfig: MODEL_GPT4o,
+      modelConfig: MODEL_GPT41,
+    },
+    code_generator: {
+      template: "llamaindexserver",
+      dataSources: [],
+      tools: [],
+      modelConfig: MODEL_GPT41,
+    },
+    document_generator: {
+      template: "llamaindexserver",
+      dataSources: [],
+      tools: [],
+      modelConfig: MODEL_GPT41,
+    },
+    hitl: {
+      template: "llamaindexserver",
+      dataSources: [],
+      tools: [],
+      modelConfig: MODEL_GPT41,
     },
   };
 

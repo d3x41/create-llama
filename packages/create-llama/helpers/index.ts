@@ -4,6 +4,7 @@ import path from "path";
 import picocolors, { cyan } from "picocolors";
 
 import fsExtra from "fs-extra";
+import { NO_DATA_USE_CASES } from "./constant";
 import { writeLoadersConfig } from "./datasources";
 import { createBackendEnvFile, createFrontendEnvFile } from "./env-variables";
 import { PackageManager } from "./get-pkg-manager";
@@ -18,6 +19,7 @@ import {
   ModelConfig,
   TemplateDataSource,
   TemplateFramework,
+  TemplateUseCase,
   TemplateVectorDB,
 } from "./types";
 import { installTSTemplate } from "./typescript";
@@ -60,6 +62,7 @@ async function generateContextData(
   vectorDb?: TemplateVectorDB,
   llamaCloudKey?: string,
   useLlamaParse?: boolean,
+  useCase?: TemplateUseCase,
 ) {
   if (packageManager) {
     const runGenerate = `${cyan(
@@ -96,7 +99,13 @@ async function generateContextData(
         }
       } else {
         console.log(`Running ${runGenerate} to generate the context data.`);
-        await callPackageManager(packageManager, true, ["run", "generate"]);
+
+        const shouldRunGenerate =
+          !useCase || !NO_DATA_USE_CASES.includes(useCase);
+
+        if (shouldRunGenerate) {
+          await callPackageManager(packageManager, true, ["run", "generate"]);
+        }
         return;
       }
     }
@@ -224,6 +233,7 @@ export const installTemplate = async (
         props.vectorDb,
         props.llamaCloudKey,
         props.useLlamaParse,
+        props.useCase,
       );
     }
 
