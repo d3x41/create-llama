@@ -3,14 +3,15 @@ import os
 from typing import TYPE_CHECKING, Any, Optional
 
 from llama_cloud import PipelineType
+from pydantic import BaseModel, Field, field_validator
+
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.ingestion.api_utils import (
     get_client as llama_cloud_get_client,
 )
 from llama_index.core.settings import Settings
 from llama_index.indices.managed.llama_cloud import LlamaCloudIndex
-from llama_index.server.api.models import ChatRequest
-from pydantic import BaseModel, Field, field_validator
+from llama_index.server.models.chat import ChatRequest
 
 if TYPE_CHECKING:
     from llama_cloud.client import LlamaCloud
@@ -91,14 +92,14 @@ class IndexConfig(BaseModel):
     def from_default(cls, chat_request: Optional[ChatRequest] = None) -> "IndexConfig":
         default_config = cls()
         if chat_request is not None and chat_request.data is not None:
-            llamacloud_config = chat_request.data.get("llamaCloudPipeline")
+            llamacloud_config = chat_request.data.llama_cloud_pipeline
             if llamacloud_config is not None:
-                default_config.llama_cloud_pipeline_config.pipeline = llamacloud_config[
-                    "pipeline"
-                ]
-                default_config.llama_cloud_pipeline_config.project = llamacloud_config[
-                    "project"
-                ]
+                default_config.llama_cloud_pipeline_config.pipeline = (
+                    llamacloud_config.pipeline
+                )
+                default_config.llama_cloud_pipeline_config.project = (
+                    llamacloud_config.project
+                )
         return default_config
 
 

@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { bold, cyan, red, yellow } from "picocolors";
+import { bold, cyan, red } from "picocolors";
 import { assetRelocator, copy } from "../helpers/copy";
 import { callPackageManager } from "../helpers/install";
 import { templatesDir } from "./dir";
@@ -12,7 +12,12 @@ const installLlamaIndexServerTemplate = async ({
   root,
   useCase,
   vectorDb,
-}: Pick<InstallTemplateArgs, "root" | "useCase" | "vectorDb">) => {
+  modelConfig,
+  dataSources,
+}: Pick<
+  InstallTemplateArgs,
+  "root" | "useCase" | "vectorDb" | "modelConfig" | "dataSources"
+>) => {
   if (!useCase) {
     console.log(
       red(
@@ -31,268 +36,62 @@ const installLlamaIndexServerTemplate = async ({
     process.exit(1);
   }
 
-  await copy("workflow.ts", path.join(root, "src", "app"), {
-    parents: true,
+  // copy model provider settings to app folder
+  await copy("**", path.join(root, "src", "app"), {
     cwd: path.join(
       templatesDir,
       "components",
-      "workflows",
+      "providers",
       "typescript",
-      useCase,
+      modelConfig.provider,
     ),
   });
 
-  // copy workflow UI components to output/components folder
-  await copy("*", path.join(root, "components"), {
-    parents: true,
-    cwd: path.join(templatesDir, "components", "ui", "workflows", useCase),
-  });
-
-  if (vectorDb === "llamacloud") {
-    await copy("generate.ts", path.join(root, "src"), {
-      parents: true,
-      cwd: path.join(
-        templatesDir,
-        "components",
-        "vectordbs",
-        "llamaindexserver",
-        "llamacloud",
-        "typescript",
-      ),
-    });
-
-    await copy("index.ts", path.join(root, "src", "app"), {
-      parents: true,
-      cwd: path.join(
-        templatesDir,
-        "components",
-        "vectordbs",
-        "llamaindexserver",
-        "llamacloud",
-        "typescript",
-      ),
-      rename: () => "data.ts",
-    });
-  }
-  // Copy README.md
-  await copy("README-template.md", path.join(root), {
-    parents: true,
+  await copy("**", path.join(root), {
     cwd: path.join(
       templatesDir,
       "components",
-      "workflows",
+      "use-cases",
       "typescript",
       useCase,
     ),
     rename: assetRelocator,
   });
-};
 
-const installLegacyTSTemplate = async ({
-  root,
-  template,
-  backend,
-  framework,
-  ui,
-  vectorDb,
-  observability,
-  tools,
-  dataSources,
-  useLlamaParse,
-  useCase,
-  modelConfig,
-  relativeEngineDestPath,
-}: InstallTemplateArgs & {
-  backend: boolean;
-  relativeEngineDestPath: string;
-}) => {
-  /**
-   * If next.js is used, update its configuration if necessary
-   */
-  if (framework === "nextjs") {
-    const nextConfigJsonFile = path.join(root, "next.config.json");
-    const nextConfigJson: any = JSON.parse(
-      await fs.readFile(nextConfigJsonFile, "utf8"),
-    );
-    if (!backend) {
-      // update next.config.json for static site generation
-      nextConfigJson.output = "export";
-      nextConfigJson.images = { unoptimized: true };
-      console.log("\nUsing static site generation\n");
-    } else {
-      if (vectorDb === "milvus") {
-        nextConfigJson.serverExternalPackages =
-          nextConfigJson.serverExternalPackages ?? [];
-        nextConfigJson.serverExternalPackages.push("@zilliz/milvus2-sdk-node");
-      }
-    }
-    await fs.writeFile(
-      nextConfigJsonFile,
-      JSON.stringify(nextConfigJson, null, 2) + os.EOL,
-    );
-
-    const webpackConfigOtelFile = path.join(root, "webpack.config.o11y.mjs");
-    if (observability === "traceloop") {
-      const webpackConfigDefaultFile = path.join(root, "webpack.config.mjs");
-      await fs.rm(webpackConfigDefaultFile);
-      await fs.rename(webpackConfigOtelFile, webpackConfigDefaultFile);
-    } else {
-      await fs.rm(webpackConfigOtelFile);
-    }
-  }
-
-  // copy observability component
-  if (observability && observability !== "none") {
-    const chosenObservabilityPath = path.join(
-      templatesDir,
-      "components",
-      "observability",
-      "typescript",
-      observability,
-    );
-    const relativeObservabilityPath = framework === "nextjs" ? "app" : "src";
-
-    await copy(
-      "**",
-      path.join(root, relativeObservabilityPath, "observability"),
-      { cwd: chosenObservabilityPath },
-    );
-  }
-
-  const compPath = path.join(templatesDir, "components");
-  const enginePath = path.join(root, relativeEngineDestPath, "engine");
-
-  // copy llamaindex code for TS templates
-  await copy("**", path.join(root, relativeEngineDestPath, "llamaindex"), {
+  // copy workflow UI components to components folder in root
+  await copy("*", path.join(root, "components"), {
     parents: true,
-    cwd: path.join(compPath, "llamaindex", "typescript"),
+    cwd: path.join(templatesDir, "components", "ui", "use-cases", useCase),
   });
 
-  // copy vector db component
+  // copy layout components to layout folder in root
+  await copy("*", path.join(root, "layout"), {
+    parents: true,
+    cwd: path.join(templatesDir, "components", "ui", "layout"),
+  });
+
+  // Override generate.ts if workflow use case doesn't use custom UI
   if (vectorDb === "llamacloud") {
-    console.log(
-      `\nUsing managed index from LlamaCloud. Ensure the ${yellow("LLAMA_CLOUD_* environment variables are set correctly.")}`,
-    );
-  } else {
-    console.log("\nUsing vector DB:", vectorDb ?? "none");
-  }
-  await copy("**", enginePath, {
-    parents: true,
-    cwd: path.join(compPath, "vectordbs", "typescript", vectorDb ?? "none"),
-  });
-
-  if (template === "multiagent") {
-    const multiagentPath = path.join(compPath, "multiagent", "typescript");
-
-    // copy workflow code for multiagent template
-    await copy("**", path.join(root, relativeEngineDestPath, "workflow"), {
+    await copy("**", path.join(root, "src"), {
       parents: true,
-      cwd: path.join(multiagentPath, "workflow"),
-    });
-
-    // Copy use case code for multiagent template
-    if (useCase) {
-      console.log("\nCopying use case:", useCase, "\n");
-      const useCasePath = path.join(compPath, "agents", "typescript", useCase);
-      const useCaseCodePath = path.join(useCasePath, "workflow");
-
-      // Copy use case codes
-      await copy("**", path.join(root, relativeEngineDestPath, "workflow"), {
-        parents: true,
-        cwd: useCaseCodePath,
-        rename: assetRelocator,
-      });
-
-      // Copy use case files to project root
-      await copy("*.*", path.join(root), {
-        parents: true,
-        cwd: useCasePath,
-        rename: assetRelocator,
-      });
-    } else {
-      console.log(
-        red(
-          `There is no use case selected for ${template} template. Please pick a use case to use via --use-case flag.`,
-        ),
-      );
-      process.exit(1);
-    }
-
-    if (framework === "nextjs") {
-      // patch route.ts file
-      await copy("**", path.join(root, relativeEngineDestPath), {
-        parents: true,
-        cwd: path.join(multiagentPath, "nextjs"),
-      });
-    } else if (framework === "express") {
-      // patch chat.controller.ts file
-      await copy("**", path.join(root, relativeEngineDestPath), {
-        parents: true,
-        cwd: path.join(multiagentPath, "express"),
-      });
-    }
-  }
-
-  // copy loader component (TS only supports llama_parse and file for now)
-  const loaderFolder = useLlamaParse ? "llama_parse" : "file";
-  await copy("**", enginePath, {
-    parents: true,
-    cwd: path.join(compPath, "loaders", "typescript", loaderFolder),
-  });
-
-  // copy provider settings
-  await copy("**", enginePath, {
-    parents: true,
-    cwd: path.join(compPath, "providers", "typescript", modelConfig.provider),
-  });
-
-  // Select and copy engine code based on data sources and tools
-  let engine;
-  tools = tools ?? [];
-  // multiagent template always uses agent engine
-  if (template === "multiagent") {
-    engine = "agent";
-  } else if (dataSources.length > 0 && tools.length === 0) {
-    console.log("\nNo tools selected - use optimized context chat engine\n");
-    engine = "chat";
-  } else {
-    engine = "agent";
-  }
-  await copy("**", enginePath, {
-    parents: true,
-    cwd: path.join(compPath, "engines", "typescript", engine),
-  });
-
-  // copy settings to engine folder
-  await copy("**", enginePath, {
-    cwd: path.join(compPath, "settings", "typescript"),
-  });
-
-  /**
-   * Copy the selected UI files to the target directory and reference it.
-   */
-  if (framework === "nextjs" && ui !== "shadcn") {
-    console.log("\nUsing UI:", ui, "\n");
-    const uiPath = path.join(compPath, "ui", ui);
-    const destUiPath = path.join(root, "app", "components", "ui");
-    // remove the default ui folder
-    await fs.rm(destUiPath, { recursive: true });
-    // copy the selected ui folder
-    await copy("**", destUiPath, {
-      parents: true,
-      cwd: uiPath,
-      rename: assetRelocator,
+      cwd: path.join(
+        templatesDir,
+        "components",
+        "vectordbs",
+        "llamaindexserver",
+        "llamacloud",
+        "typescript",
+      ),
     });
   }
 
-  /** Modify frontend code to use custom API path */
-  if (framework === "nextjs" && !backend) {
-    console.log(
-      "\nUsing external API for frontend, removing API code and configuration\n",
-    );
-    // remove the default api folder and config folder
-    await fs.rm(path.join(root, "app", "api"), { recursive: true });
-    await fs.rm(path.join(root, "config"), { recursive: true, force: true });
+  // Simplify use case code
+  if (vectorDb === "none" && dataSources.length === 0) {
+    // use case without data sources doesn't use index.
+    // We don't need data.ts, generate.ts
+    await fs.rm(path.join(root, "src", "app", "data.ts"));
+    // TODO: split generate.ts into generate for index and generate for ui and remove generate for index here too
+    // then we can also remove it for llamacloud
   }
 };
 
@@ -303,20 +102,14 @@ export const installTSTemplate = async ({
   appName,
   root,
   packageManager,
-  isOnline,
   template,
   framework,
-  ui,
   vectorDb,
   postInstallAction,
-  backend,
-  observability,
-  tools,
   dataSources,
-  useLlamaParse,
   useCase,
   modelConfig,
-}: InstallTemplateArgs & { backend: boolean }) => {
+}: InstallTemplateArgs) => {
   console.log(bold(`Using ${packageManager}.`));
 
   /**
@@ -332,57 +125,27 @@ export const installTSTemplate = async ({
     rename: assetRelocator,
   });
 
-  const relativeEngineDestPath =
-    framework === "nextjs"
-      ? path.join("app", "api", "chat")
-      : path.join("src", "controllers");
-
   if (template === "llamaindexserver") {
     await installLlamaIndexServerTemplate({
       root,
       useCase,
       vectorDb,
+      modelConfig,
+      dataSources,
     });
   } else {
-    await installLegacyTSTemplate({
-      appName,
-      root,
-      packageManager,
-      isOnline,
-      template,
-      backend,
-      framework,
-      ui,
-      vectorDb,
-      observability,
-      tools,
-      dataSources,
-      useLlamaParse,
-      useCase,
-      modelConfig,
-      relativeEngineDestPath,
-    });
+    throw new Error(`Template ${template} not supported`);
   }
 
   const packageJson = await updatePackageJson({
     root,
     appName,
-    dataSources,
-    relativeEngineDestPath,
-    framework,
-    ui,
-    observability,
     vectorDb,
-    backend,
     modelConfig,
-    template,
   });
 
-  if (
-    backend &&
-    (postInstallAction === "runApp" || postInstallAction === "dependencies")
-  ) {
-    await installTSDependencies(packageJson, packageManager, isOnline);
+  if (postInstallAction === "runApp" || postInstallAction === "dependencies") {
+    await installTSDependencies(packageJson, packageManager, true);
   }
 };
 
@@ -390,7 +153,7 @@ const providerDependencies: {
   [key in ModelProvider]?: Record<string, string>;
 } = {
   openai: {
-    "@llamaindex/openai": "^0.2.0",
+    "@llamaindex/openai": "~0.4.0",
   },
   gemini: {
     "@llamaindex/google": "^0.2.0",
@@ -451,30 +214,12 @@ const vectorDbDependencies: Record<TemplateVectorDB, Record<string, string>> = {
 async function updatePackageJson({
   root,
   appName,
-  dataSources,
-  relativeEngineDestPath,
-  framework,
-  ui,
-  observability,
   vectorDb,
-  backend,
   modelConfig,
-  template,
 }: Pick<
   InstallTemplateArgs,
-  | "root"
-  | "appName"
-  | "dataSources"
-  | "framework"
-  | "ui"
-  | "observability"
-  | "vectorDb"
-  | "modelConfig"
-  | "template"
-> & {
-  relativeEngineDestPath: string;
-  backend: boolean;
-}): Promise<any> {
+  "root" | "appName" | "vectorDb" | "modelConfig"
+>): Promise<any> {
   const packageJsonFile = path.join(root, "package.json");
   const packageJson: any = JSON.parse(
     await fs.readFile(packageJsonFile, "utf8"),
@@ -482,67 +227,32 @@ async function updatePackageJson({
   packageJson.name = appName;
   packageJson.version = "0.1.0";
 
-  if (relativeEngineDestPath && template !== "llamaindexserver") {
-    // TODO: move script to {root}/scripts for all frameworks
-    // add generate script if using context engine
-    packageJson.scripts = {
-      ...packageJson.scripts,
-      generate: `tsx ${path.join(
-        relativeEngineDestPath,
-        "engine",
-        "generate.ts",
-      )}`,
+  packageJson.dependencies = {
+    ...packageJson.dependencies,
+    "@llamaindex/readers": "~3.1.4",
+  };
+
+  if (vectorDb && vectorDb in vectorDbDependencies) {
+    packageJson.dependencies = {
+      ...packageJson.dependencies,
+      ...vectorDbDependencies[vectorDb],
     };
   }
 
-  if (framework === "nextjs" && ui === "html") {
-    // remove shadcn dependencies if html ui is selected
+  if (modelConfig.provider && modelConfig.provider in providerDependencies) {
     packageJson.dependencies = {
       ...packageJson.dependencies,
-      "tailwind-merge": undefined,
-      "@radix-ui/react-slot": undefined,
-      "class-variance-authority": undefined,
-      clsx: undefined,
-      "lucide-react": undefined,
-      remark: undefined,
-      "remark-code-import": undefined,
-      "remark-gfm": undefined,
-      "remark-math": undefined,
-      "react-markdown": undefined,
-      "highlight.js": undefined,
+      ...providerDependencies[modelConfig.provider],
     };
   }
 
-  if (backend) {
+  // if having custom server package tgz file, use it for testing @llamaindex/server
+  const serverPackagePath = process.env.SERVER_PACKAGE_PATH;
+  if (serverPackagePath) {
+    const relativePath = path.relative(process.cwd(), serverPackagePath);
     packageJson.dependencies = {
       ...packageJson.dependencies,
-      "@llamaindex/readers": "^2.0.0",
-    };
-
-    if (vectorDb && vectorDb in vectorDbDependencies) {
-      packageJson.dependencies = {
-        ...packageJson.dependencies,
-        ...vectorDbDependencies[vectorDb],
-      };
-    }
-
-    if (modelConfig.provider && modelConfig.provider in providerDependencies) {
-      packageJson.dependencies = {
-        ...packageJson.dependencies,
-        ...providerDependencies[modelConfig.provider],
-      };
-    }
-  }
-
-  if (observability === "traceloop") {
-    packageJson.dependencies = {
-      ...packageJson.dependencies,
-      "@traceloop/node-server-sdk": "^0.5.19",
-    };
-
-    packageJson.devDependencies = {
-      ...packageJson.devDependencies,
-      "node-loader": "^2.0.0",
+      "@llamaindex/server": `file:${relativePath}`,
     };
   }
 
