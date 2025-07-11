@@ -7,32 +7,32 @@ import { isUvAvailable, tryUvSync } from "./uv";
 
 import { assetRelocator, copy } from "./copy";
 import { templatesDir } from "./dir";
-import { Tool } from "./tools";
-import {
-  InstallTemplateArgs,
-  ModelConfig,
-  TemplateDataSource,
-  TemplateObservability,
-  TemplateType,
-  TemplateVectorDB,
-} from "./types";
-
-interface Dependency {
-  name: string;
-  version?: string;
-  extras?: string[];
-  constraints?: Record<string, string>;
-}
+import { Dependency, InstallTemplateArgs } from "./types";
+import { USE_CASE_CONFIGS } from "./use-case";
 
 const getAdditionalDependencies = (
-  modelConfig: ModelConfig,
-  vectorDb?: TemplateVectorDB,
-  dataSources?: TemplateDataSource[],
-  tools?: Tool[],
-  templateType?: TemplateType,
-  observability?: TemplateObservability,
+  opts: Pick<
+    InstallTemplateArgs,
+    | "framework"
+    | "template"
+    | "useCase"
+    | "modelConfig"
+    | "vectorDb"
+    | "dataSources"
+  >,
 ) => {
+  const { framework, template, useCase, modelConfig, vectorDb, dataSources } =
+    opts;
+
   const dependencies: Dependency[] = [];
+
+  const isPythonLlamaDeploy =
+    framework === "fastapi" && template === "llamaindexserver";
+  const useCaseDependencies =
+    USE_CASE_CONFIGS[useCase]?.additionalDependencies ?? [];
+  if (isPythonLlamaDeploy && useCaseDependencies.length > 0) {
+    dependencies.push(...useCaseDependencies);
+  }
 
   // Add vector db dependencies
   switch (vectorDb) {
@@ -93,6 +93,10 @@ const getAdditionalDependencies = (
         name: "llama-index-vector-stores-chroma",
         version: ">=0.4.0,<0.5.0",
       });
+      dependencies.push({
+        name: "onnxruntime",
+        version: "<1.22.0",
+      });
       break;
     }
     case "weaviate": {
@@ -146,14 +150,6 @@ const getAdditionalDependencies = (
     }
   }
 
-  // Add tools dependencies
-  console.log("Adding tools dependencies");
-  tools?.forEach((tool) => {
-    tool.dependencies?.forEach((dep) => {
-      dependencies.push(dep);
-    });
-  });
-
   switch (modelConfig.provider) {
     case "ollama":
       dependencies.push({
@@ -166,20 +162,14 @@ const getAdditionalDependencies = (
       });
       break;
     case "openai":
-      if (templateType !== "multiagent") {
-        dependencies.push({
-          name: "llama-index-llms-openai",
-          version: ">=0.3.2,<0.4.0",
-        });
-        dependencies.push({
-          name: "llama-index-embeddings-openai",
-          version: ">=0.3.1,<0.4.0",
-        });
-        dependencies.push({
-          name: "llama-index-agent-openai",
-          version: ">=0.4.0,<0.5.0",
-        });
-      }
+      dependencies.push({
+        name: "llama-index-llms-openai",
+        version: ">=0.3.2,<0.4.0",
+      });
+      dependencies.push({
+        name: "llama-index-embeddings-openai",
+        version: ">=0.3.1,<0.4.0",
+      });
       break;
     case "groq":
       dependencies.push({
@@ -203,12 +193,12 @@ const getAdditionalDependencies = (
       break;
     case "gemini":
       dependencies.push({
-        name: "llama-index-llms-gemini",
-        version: ">=0.4.0,<0.5.0",
+        name: "llama-index-llms-google-genai",
+        version: ">=0.2.0,<0.3.0",
       });
       dependencies.push({
-        name: "llama-index-embeddings-gemini",
-        version: ">=0.3.0,<0.4.0",
+        name: "llama-index-embeddings-google-genai",
+        version: ">=0.2.0,<0.3.0",
       });
       break;
     case "mistral":
@@ -258,33 +248,16 @@ const getAdditionalDependencies = (
       break;
   }
 
-  if (observability && observability !== "none") {
-    if (observability === "traceloop") {
-      dependencies.push({
-        name: "traceloop-sdk",
-        version: ">=0.15.11,<0.16.0",
-      });
-    }
-    if (observability === "llamatrace") {
-      dependencies.push({
-        name: "llama-index-callbacks-arize-phoenix",
-        version: ">=0.3.0,<0.4.0",
-      });
-    }
+  // If app template is llama-index-server and CI and SERVER_PACKAGE_PATH is set,
+  // add @llamaindex/server to dependencies
+  if (process.env.SERVER_PACKAGE_PATH) {
+    dependencies.push({
+      name: "llama-index-server",
+      version: `@file://${process.env.SERVER_PACKAGE_PATH}`,
+    });
   }
 
   return dependencies;
-};
-
-const copyRouterCode = async (root: string, tools: Tool[]) => {
-  // Copy sandbox router if the artifact tool is selected
-  if (tools?.some((t) => t.name === "artifact")) {
-    await copy("sandbox.py", path.join(root, "app", "api", "routers"), {
-      parents: true,
-      cwd: path.join(templatesDir, "components", "routers", "python"),
-      rename: assetRelocator,
-    });
-  }
 };
 
 export const addDependencies = async (
@@ -427,132 +400,15 @@ export const installPythonDependencies = () => {
   }
 };
 
-const installLegacyPythonTemplate = async ({
-  root,
-  template,
-  vectorDb,
-  dataSources,
-  tools,
-  useCase,
-  observability,
-}: Pick<
-  InstallTemplateArgs,
-  | "root"
-  | "template"
-  | "vectorDb"
-  | "dataSources"
-  | "tools"
-  | "useCase"
-  | "observability"
->) => {
-  const compPath = path.join(templatesDir, "components");
-  const enginePath = path.join(root, "app", "engine");
-
-  // Copy selected vector DB
-  await copy("**", enginePath, {
-    parents: true,
-    cwd: path.join(compPath, "vectordbs", "python", vectorDb ?? "none"),
-  });
-
-  if (vectorDb !== "llamacloud") {
-    // Copy all loaders to enginePath
-    // Not needed for LlamaCloud as it has its own loaders
-    const loaderPath = path.join(enginePath, "loaders");
-    await copy("**", loaderPath, {
-      parents: true,
-      cwd: path.join(compPath, "loaders", "python"),
-    });
-  }
-
-  // Copy settings.py to app
-  await copy("**", path.join(root, "app"), {
-    cwd: path.join(compPath, "settings", "python"),
-  });
-
-  // Copy services
-  if (template == "streaming" || template == "multiagent") {
-    await copy("**", path.join(root, "app", "api", "services"), {
-      cwd: path.join(compPath, "services", "python"),
-    });
-  }
-  // Copy engine code
-  if (template === "streaming" || template === "multiagent") {
-    // Select and copy engine code based on data sources and tools
-    let engine;
-    // Multiagent always uses agent engine
-    if (template === "multiagent") {
-      engine = "agent";
-    } else {
-      // For streaming, use chat engine by default
-      // Unless tools are selected, in which case use agent engine
-      if (dataSources.length > 0 && (!tools || tools.length === 0)) {
-        console.log(
-          "\nNo tools selected - use optimized context chat engine\n",
-        );
-        engine = "chat";
-      } else {
-        engine = "agent";
-      }
-    }
-
-    // Copy engine code
-    await copy("**", enginePath, {
-      parents: true,
-      cwd: path.join(compPath, "engines", "python", engine),
-    });
-
-    // Copy router code
-    await copyRouterCode(root, tools ?? []);
-  }
-
-  // Copy multiagents overrides
-  if (template === "multiagent") {
-    await copy("**", path.join(root), {
-      cwd: path.join(compPath, "multiagent", "python"),
-    });
-  }
-
-  if (template === "multiagent" || template === "reflex") {
-    if (useCase) {
-      const sourcePath =
-        template === "multiagent"
-          ? path.join(compPath, "agents", "python", useCase)
-          : path.join(compPath, "reflex", useCase);
-
-      await copy("**", path.join(root), {
-        parents: true,
-        cwd: sourcePath,
-        rename: assetRelocator,
-      });
-    } else {
-      console.log(
-        red(
-          `There is no use case selected for ${template} template. Please pick a use case to use via --use-case flag.`,
-        ),
-      );
-      process.exit(1);
-    }
-  }
-
-  if (observability && observability !== "none") {
-    const templateObservabilityPath = path.join(
-      templatesDir,
-      "components",
-      "observability",
-      "python",
-      observability,
-    );
-    await copy("**", path.join(root, "app"), {
-      cwd: templateObservabilityPath,
-    });
-  }
-};
-
 const installLlamaIndexServerTemplate = async ({
   root,
   useCase,
   useLlamaParse,
-}: Pick<InstallTemplateArgs, "root" | "useCase" | "useLlamaParse">) => {
+  modelConfig,
+}: Pick<
+  InstallTemplateArgs,
+  "root" | "useCase" | "useLlamaParse" | "modelConfig"
+>) => {
   if (!useCase) {
     console.log(
       red(
@@ -562,31 +418,46 @@ const installLlamaIndexServerTemplate = async ({
     process.exit(1);
   }
 
-  await copy("workflow.py", path.join(root, "app"), {
+  const srcDir = path.join(root, "src");
+  const uiDir = path.join(root, "ui");
+
+  // copy workflow code to src folder
+  await copy("*.py", srcDir, {
     parents: true,
-    cwd: path.join(templatesDir, "components", "workflows", "python", useCase),
+    cwd: path.join(templatesDir, "components", "use-cases", "python", useCase),
   });
 
-  // Copy custom UI component code
-  await copy(`*`, path.join(root, "components"), {
+  // copy model provider settings to src folder
+  await copy("**", srcDir, {
+    cwd: path.join(
+      templatesDir,
+      "components",
+      "providers",
+      "python",
+      modelConfig.provider,
+    ),
+  });
+
+  // copy ts server to ui folder
+  await copy("**", uiDir, {
     parents: true,
-    cwd: path.join(templatesDir, "components", "ui", "workflows", useCase),
+    cwd: path.join(templatesDir, "components", "ts-proxy"),
+  });
+
+  // Copy custom UI components to ui/components folder
+  await copy(`*`, path.join(uiDir, "components"), {
+    parents: true,
+    cwd: path.join(templatesDir, "components", "ui", "use-cases", useCase),
+  });
+
+  // Copy layout components to ui/layout folder
+  await copy("*", path.join(uiDir, "layout"), {
+    parents: true,
+    cwd: path.join(templatesDir, "components", "ui", "layout"),
   });
 
   if (useLlamaParse) {
-    await copy("index.py", path.join(root, "app"), {
-      parents: true,
-      cwd: path.join(
-        templatesDir,
-        "components",
-        "vectordbs",
-        "llamaindexserver",
-        "llamacloud",
-        "python",
-      ),
-    });
-    // TODO: Consider moving generate.py to app folder.
-    await copy("generate.py", path.join(root), {
+    await copy("**", srcDir, {
       parents: true,
       cwd: path.join(
         templatesDir,
@@ -601,9 +472,15 @@ const installLlamaIndexServerTemplate = async ({
   // Copy README.md
   await copy("README-template.md", path.join(root), {
     parents: true,
-    cwd: path.join(templatesDir, "components", "workflows", "python", useCase),
+    cwd: path.join(templatesDir, "components", "use-cases", "python", useCase),
     rename: assetRelocator,
   });
+
+  // Clean up, remove generate.py and index.py for non-data use cases
+  if (["code_generator", "document_generator", "hitl"].includes(useCase)) {
+    await fs.unlink(path.join(srcDir, "generate.py"));
+    await fs.unlink(path.join(srcDir, "index.py"));
+  }
 };
 
 export const installPythonTemplate = async ({
@@ -615,10 +492,8 @@ export const installPythonTemplate = async ({
   postInstallAction,
   modelConfig,
   dataSources,
-  tools,
   useLlamaParse,
   useCase,
-  observability,
 }: Pick<
   InstallTemplateArgs,
   | "appName"
@@ -629,18 +504,11 @@ export const installPythonTemplate = async ({
   | "postInstallAction"
   | "modelConfig"
   | "dataSources"
-  | "tools"
   | "useLlamaParse"
   | "useCase"
-  | "observability"
 >) => {
   console.log("\nInitializing Python project with template:", template, "\n");
-  let templatePath;
-  if (template === "reflex") {
-    templatePath = path.join(templatesDir, "types", "reflex");
-  } else {
-    templatePath = path.join(templatesDir, "types", template, framework);
-  }
+  const templatePath = path.join(templatesDir, "types", template, framework);
   await copy("**", root, {
     parents: true,
     cwd: templatePath,
@@ -652,27 +520,21 @@ export const installPythonTemplate = async ({
       root,
       useCase,
       useLlamaParse,
+      modelConfig,
     });
   } else {
-    await installLegacyPythonTemplate({
-      root,
-      template,
-      vectorDb,
-      dataSources,
-      tools,
-      useCase,
-      observability,
-    });
+    throw new Error(`Template ${template} not supported`);
   }
 
   console.log("Adding additional dependencies");
-  const addOnDependencies = getAdditionalDependencies(
+  const addOnDependencies = getAdditionalDependencies({
+    framework,
+    template,
+    useCase,
     modelConfig,
     vectorDb,
     dataSources,
-    tools,
-    template,
-  );
+  });
 
   await addDependencies(root, addOnDependencies);
 

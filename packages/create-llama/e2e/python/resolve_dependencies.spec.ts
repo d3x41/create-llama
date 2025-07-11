@@ -3,181 +3,44 @@ import { exec } from "child_process";
 import fs from "fs";
 import path from "path";
 import util from "util";
-import { TemplateFramework, TemplateVectorDB } from "../../helpers/types";
+import { TemplateFramework, TemplateUseCase, TemplateVectorDB } from "../../helpers";
+import { ALL_PYTHON_USE_CASES } from "../../helpers/use-case";
 import { RunCreateLlamaOptions, createTestDir, runCreateLlama } from "../utils";
 
 const execAsync = util.promisify(exec);
 
-const templateFramework: TemplateFramework = process.env.FRAMEWORK
-  ? (process.env.FRAMEWORK as TemplateFramework)
-  : "fastapi";
-const dataSource: string = process.env.DATASOURCE
-  ? process.env.DATASOURCE
-  : "--example-file";
+const templateFramework: TemplateFramework = "fastapi";
+const vectorDb: TemplateVectorDB = process.env.VECTORDB
+  ? (process.env.VECTORDB as TemplateVectorDB)
+  : "none";
 
-// TODO: add support for other templates
+const useCases: TemplateUseCase[] = vectorDb === "llamacloud" ? [
+  "agentic_rag", "deep_research", "financial_report"
+] : ALL_PYTHON_USE_CASES
 
-if (
-  dataSource === "--example-file" // XXX: this test provides its own data source - only trigger it on one data source (usually the CI matrix will trigger multiple data sources)
-) {
-  // vectorDBs, tools, and data source combinations to test
-  const vectorDbs: TemplateVectorDB[] = [
-    "mongo",
-    "pg",
-    "pinecone",
-    "milvus",
-    "astra",
-    "qdrant",
-    "chroma",
-    "weaviate",
-  ];
+test.describe("Mypy check", () => {
+  test.describe.configure({ retries: 0 });
 
-  const toolOptions = [
-    "wikipedia.WikipediaToolSpec",
-    "google.GoogleSearchToolSpec",
-    "document_generator",
-    "artifact",
-  ];
-
-  const dataSources = [
-    "--example-file",
-    "--web-source https://www.example.com",
-    "--db-source mysql+pymysql://user:pass@localhost:3306/mydb",
-  ];
-
-  const observabilityOptions = ["llamatrace", "traceloop"];
-
-  test.describe("Mypy check", () => {
-    test.describe.configure({ retries: 0 });
-
-    // Test vector databases
-    for (const vectorDb of vectorDbs) {
-      test(`Mypy check for vectorDB: ${vectorDb}`, async () => {
+  test.describe("LlamaIndexServer", async () => {
+    for (const useCase of useCases) {
+      test(`should pass mypy for use case: ${useCase}`, async () => {
         const cwd = await createTestDir();
-        const { pyprojectPath } = await createAndCheckLlamaProject({
+        await createAndCheckLlamaProject({
           options: {
             cwd,
-            templateType: "streaming",
             templateFramework,
-            dataSource: "--example-file",
             vectorDb,
-            tools: "none",
             port: 3000,
             postInstallAction: "none",
-            templateUI: undefined,
-            appType: "--no-frontend",
             llamaCloudProjectName: undefined,
             llamaCloudIndexName: undefined,
-            observability: undefined,
-          },
-        });
-
-        const pyprojectContent = fs.readFileSync(pyprojectPath, "utf-8");
-        if (vectorDb !== "none") {
-          if (vectorDb === "pg") {
-            expect(pyprojectContent).toContain(
-              "llama-index-vector-stores-postgres",
-            );
-          } else {
-            expect(pyprojectContent).toContain(
-              `llama-index-vector-stores-${vectorDb}`,
-            );
-          }
-        }
-      });
-    }
-
-    // Test tools
-    for (const tool of toolOptions) {
-      test(`Mypy check for tool: ${tool}`, async () => {
-        const cwd = await createTestDir();
-        const { pyprojectPath } = await createAndCheckLlamaProject({
-          options: {
-            cwd,
-            templateType: "streaming",
-            templateFramework,
-            dataSource: "--example-file",
-            vectorDb: "none",
-            tools: tool,
-            port: 3000,
-            postInstallAction: "none",
-            templateUI: undefined,
-            appType: "--no-frontend",
-            llamaCloudProjectName: undefined,
-            llamaCloudIndexName: undefined,
-            observability: undefined,
-          },
-        });
-
-        const pyprojectContent = fs.readFileSync(pyprojectPath, "utf-8");
-        if (tool === "wikipedia.WikipediaToolSpec") {
-          expect(pyprojectContent).toContain("wikipedia");
-        }
-        if (tool === "google.GoogleSearchToolSpec") {
-          expect(pyprojectContent).toContain("google");
-        }
-      });
-    }
-
-    // Test data sources
-    for (const dataSource of dataSources) {
-      const dataSourceType = dataSource.split(" ")[0];
-      test(`Mypy check for data source: ${dataSourceType}`, async () => {
-        const cwd = await createTestDir();
-        const { pyprojectPath } = await createAndCheckLlamaProject({
-          options: {
-            cwd,
-            templateType: "streaming",
-            templateFramework,
-            dataSource,
-            vectorDb: "none",
-            tools: "none",
-            port: 3000,
-            postInstallAction: "none",
-            templateUI: undefined,
-            appType: "--no-frontend",
-            llamaCloudProjectName: undefined,
-            llamaCloudIndexName: undefined,
-            observability: undefined,
-          },
-        });
-
-        const pyprojectContent = fs.readFileSync(pyprojectPath, "utf-8");
-        if (dataSource.includes("--web-source")) {
-          expect(pyprojectContent).toContain("llama-index-readers-web");
-        }
-        if (dataSource.includes("--db-source")) {
-          expect(pyprojectContent).toContain("llama-index-readers-database");
-        }
-      });
-    }
-
-    // Test observability options
-    for (const observability of observabilityOptions) {
-      test(`Mypy check for observability: ${observability}`, async () => {
-        const cwd = await createTestDir();
-
-        const { pyprojectPath } = await createAndCheckLlamaProject({
-          options: {
-            cwd,
-            templateType: "streaming",
-            templateFramework,
-            dataSource: "--example-file",
-            vectorDb: "none",
-            tools: "none",
-            port: 3000,
-            postInstallAction: "none",
-            templateUI: undefined,
-            appType: "--no-frontend",
-            llamaCloudProjectName: undefined,
-            llamaCloudIndexName: undefined,
-            observability,
+            useCase,
           },
         });
       });
     }
   });
-}
+});
 
 async function createAndCheckLlamaProject({
   options,

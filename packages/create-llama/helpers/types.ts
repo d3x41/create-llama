@@ -1,5 +1,4 @@
 import { PackageManager } from "../helpers/get-pkg-manager";
-import { Tool } from "./tools";
 
 export type ModelProvider =
   | "openai"
@@ -19,15 +18,8 @@ export type ModelConfig = {
   dimensions: number;
   isConfigured(): boolean;
 };
-export type TemplateType =
-  | "streaming"
-  | "community"
-  | "llamapack"
-  | "multiagent"
-  | "reflex"
-  | "llamaindexserver";
+export type TemplateType = "llamaindexserver";
 export type TemplateFramework = "nextjs" | "express" | "fastapi";
-export type TemplateUI = "html" | "shadcn";
 export type TemplateVectorDB =
   | "none"
   | "mongo"
@@ -49,15 +41,14 @@ export type TemplateDataSource = {
   config: TemplateDataSourceConfig;
 };
 export type TemplateDataSourceType = "file" | "web" | "db";
-export type TemplateObservability = "none" | "traceloop" | "llamatrace";
 export type TemplateUseCase =
   | "financial_report"
-  | "blog"
   | "deep_research"
-  | "form_filling"
-  | "extractor"
-  | "contract_review"
-  | "agentic_rag";
+  | "agentic_rag"
+  | "code_generator"
+  | "document_generator"
+  | "hitl";
+
 // Config for both file and folder
 export type FileSourceConfig =
   | {
@@ -83,31 +74,31 @@ export type TemplateDataSourceConfig =
   | WebSourceConfig
   | DbSourceConfig;
 
-export type CommunityProjectConfig = {
-  owner: string;
-  repo: string;
-  branch: string;
-  filePath?: string;
-};
-
 export interface InstallTemplateArgs {
   appName: string;
   root: string;
   packageManager: PackageManager;
-  isOnline: boolean;
   template: TemplateType;
   framework: TemplateFramework;
-  ui: TemplateUI;
   dataSources: TemplateDataSource[];
   modelConfig: ModelConfig;
   llamaCloudKey?: string;
-  useLlamaParse?: boolean;
-  communityProjectConfig?: CommunityProjectConfig;
-  llamapack?: string;
-  vectorDb?: TemplateVectorDB;
+  useLlamaParse: boolean;
+  vectorDb: TemplateVectorDB;
   port?: number;
-  postInstallAction?: TemplatePostInstallAction;
-  tools?: Tool[];
-  observability?: TemplateObservability;
-  useCase?: TemplateUseCase;
+  postInstallAction: TemplatePostInstallAction;
+  useCase: TemplateUseCase;
+}
+
+export type EnvVar = {
+  name?: string;
+  description?: string;
+  value?: string;
+};
+
+export interface Dependency {
+  name: string;
+  version?: string;
+  extras?: string[];
+  constraints?: Record<string, string>;
 }

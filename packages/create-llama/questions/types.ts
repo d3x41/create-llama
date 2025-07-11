@@ -1,15 +1,22 @@
 import { InstallAppArgs } from "../create-app";
+import {
+  TemplateFramework,
+  TemplatePostInstallAction,
+  TemplateUseCase,
+  TemplateVectorDB,
+} from "../helpers";
 
 export type QuestionResults = Omit<
   InstallAppArgs,
   "appPath" | "packageManager"
 >;
 
-export type PureQuestionArgs = {
+export type QuestionArgs = {
+  useCase?: TemplateUseCase;
+  framework?: TemplateFramework;
   askModels?: boolean;
-  pro?: boolean;
-  openAiKey?: string;
   llamaCloudKey?: string;
+  port?: number;
+  postInstallAction?: TemplatePostInstallAction;
+  vectorDb?: TemplateVectorDB;
 };
-
-export type QuestionArgs = QuestionResults & PureQuestionArgs;

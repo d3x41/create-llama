@@ -4,14 +4,10 @@ import path from "path";
 import picocolors, { cyan } from "picocolors";
 
 import fsExtra from "fs-extra";
-import { writeLoadersConfig } from "./datasources";
-import { createBackendEnvFile, createFrontendEnvFile } from "./env-variables";
+import { createBackendEnvFile } from "./env-variables";
 import { PackageManager } from "./get-pkg-manager";
-import { installLlamapackProject } from "./llama-pack";
 import { makeDir } from "./make-dir";
 import { installPythonTemplate } from "./python";
-import { downloadAndExtractRepo } from "./repo";
-import { ConfigFileType, writeToolsConfig } from "./tools";
 import {
   FileSourceConfig,
   InstallTemplateArgs,
@@ -56,6 +52,7 @@ const checkForGenerateScript = (
 async function generateContextData(
   framework: TemplateFramework,
   modelConfig: ModelConfig,
+  dataSources: TemplateDataSource[],
   packageManager?: PackageManager,
   vectorDb?: TemplateVectorDB,
   llamaCloudKey?: string,
@@ -96,7 +93,12 @@ async function generateContextData(
         }
       } else {
         console.log(`Running ${runGenerate} to generate the context data.`);
-        await callPackageManager(packageManager, true, ["run", "generate"]);
+
+        const shouldRunGenerate = dataSources.length > 0;
+
+        if (shouldRunGenerate) {
+          await callPackageManager(packageManager, true, ["run", "generate"]);
+        }
         return;
       }
     }
@@ -115,8 +117,13 @@ const downloadFile = async (url: string, destPath: string) => {
 const prepareContextData = async (
   root: string,
   dataSources: TemplateDataSource[],
+  isPythonLlamaDeploy: boolean,
 ) => {
-  await makeDir(path.join(root, "data"));
+  const dataDir = isPythonLlamaDeploy
+    ? path.join(root, "ui", "data")
+    : path.join(root, "data");
+
+  await makeDir(dataDir);
   for (const dataSource of dataSources) {
     const dataSourceConfig = dataSource?.config as FileSourceConfig;
     // If the path is URLs, download the data and save it to the data directory
@@ -126,8 +133,7 @@ const prepareContextData = async (
         dataSourceConfig.url.toString(),
       );
       const destPath = path.join(
-        root,
-        "data",
+        dataDir,
         dataSourceConfig.filename ??
           path.basename(dataSourceConfig.url.toString()),
       );
@@ -135,44 +141,14 @@ const prepareContextData = async (
     } else {
       // Copy local data
       console.log("Copying data from path:", dataSourceConfig.path);
-      const destPath = path.join(
-        root,
-        "data",
-        path.basename(dataSourceConfig.path),
-      );
+      const destPath = path.join(dataDir, path.basename(dataSourceConfig.path));
       await fsExtra.copy(dataSourceConfig.path, destPath);
     }
   }
 };
 
-const installCommunityProject = async ({
-  root,
-  communityProjectConfig,
-}: Pick<InstallTemplateArgs, "root" | "communityProjectConfig">) => {
-  const { owner, repo, branch, filePath } = communityProjectConfig!;
-  console.log("\nInstalling community project:", filePath || repo);
-  await downloadAndExtractRepo(root, {
-    username: owner,
-    name: repo,
-    branch,
-    filePath: filePath || "",
-  });
-};
-
-export const installTemplate = async (
-  props: InstallTemplateArgs & { backend: boolean },
-) => {
+export const installTemplate = async (props: InstallTemplateArgs) => {
   process.chdir(props.root);
-
-  if (props.template === "community" && props.communityProjectConfig) {
-    await installCommunityProject(props);
-    return;
-  }
-
-  if (props.template === "llamapack" && props.llamapack) {
-    await installLlamapackProject(props);
-    return;
-  }
 
   if (props.framework === "fastapi") {
     await installPythonTemplate(props);
@@ -180,62 +156,42 @@ export const installTemplate = async (
     await installTSTemplate(props);
   }
 
-  // write configurations
-  if (props.template !== "llamaindexserver") {
-    await writeToolsConfig(
-      props.root,
-      props.tools,
-      props.framework === "fastapi" ? ConfigFileType.YAML : ConfigFileType.JSON,
+  const isPythonLlamaDeploy =
+    props.framework === "fastapi" && props.template === "llamaindexserver";
+
+  // This is a backend, so we need to copy the test data and create the env file.
+
+  // Copy the environment file to the target directory.
+  await createBackendEnvFile(props.root, props);
+
+  await prepareContextData(
+    props.root,
+    props.dataSources.filter((ds) => ds.type === "file"),
+    isPythonLlamaDeploy,
+  );
+
+  if (
+    props.dataSources.length > 0 &&
+    (props.postInstallAction === "runApp" ||
+      props.postInstallAction === "dependencies")
+  ) {
+    console.log("\nGenerating context data...\n");
+    await generateContextData(
+      props.framework,
+      props.modelConfig,
+      props.dataSources,
+      props.packageManager,
+      props.vectorDb,
+      props.llamaCloudKey,
+      props.useLlamaParse,
     );
-    if (props.vectorDb !== "llamacloud") {
-      // write loaders configuration (currently Python only)
-      // not needed for LlamaCloud as it has its own loaders
-      await writeLoadersConfig(
-        props.root,
-        props.dataSources,
-        props.useLlamaParse,
-      );
-    }
   }
 
-  if (props.backend) {
-    // This is a backend, so we need to copy the test data and create the env file.
-
-    // Copy the environment file to the target directory.
-    if (props.template !== "community" && props.template !== "llamapack") {
-      await createBackendEnvFile(props.root, props);
-    }
-
-    await prepareContextData(
-      props.root,
-      props.dataSources.filter((ds) => ds.type === "file"),
-    );
-
-    if (
-      props.dataSources.length > 0 &&
-      (props.postInstallAction === "runApp" ||
-        props.postInstallAction === "dependencies")
-    ) {
-      console.log("\nGenerating context data...\n");
-      await generateContextData(
-        props.framework,
-        props.modelConfig,
-        props.packageManager,
-        props.vectorDb,
-        props.llamaCloudKey,
-        props.useLlamaParse,
-      );
-    }
-
-    // Create outputs directory
+  if (!isPythonLlamaDeploy) {
+    // Create outputs directory (llama-deploy doesn't need this)
     await makeDir(path.join(props.root, "output/tools"));
     await makeDir(path.join(props.root, "output/uploaded"));
     await makeDir(path.join(props.root, "output/llamacloud"));
-  } else {
-    // this is a frontend for a full-stack app, create .env file with model information
-    await createFrontendEnvFile(props.root, {
-      vectorDb: props.vectorDb,
-    });
   }
 };
 

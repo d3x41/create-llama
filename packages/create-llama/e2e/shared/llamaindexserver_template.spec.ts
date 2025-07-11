@@ -1,54 +1,49 @@
-/* eslint-disable turbo/no-undeclared-env-vars */
 import { expect, test } from "@playwright/test";
 import { ChildProcess } from "child_process";
 import fs from "fs";
 import path from "path";
-import type {
-  TemplateFramework,
-  TemplatePostInstallAction,
-  TemplateUI,
-} from "../../helpers";
-import { createTestDir, runCreateLlama, type AppType } from "../utils";
+import { type TemplateFramework, type TemplateVectorDB } from "../../helpers";
+import {
+  ALL_PYTHON_USE_CASES,
+  ALL_TYPESCRIPT_USE_CASES,
+} from "../../helpers/use-case";
+import { createTestDir, runCreateLlama } from "../utils";
 
 const templateFramework: TemplateFramework = process.env.FRAMEWORK
   ? (process.env.FRAMEWORK as TemplateFramework)
   : "fastapi";
-const dataSource: string = "--example-file";
-const templateUI: TemplateUI = "shadcn";
-const templatePostInstallAction: TemplatePostInstallAction = "runApp";
-const appType: AppType = "--frontend";
-const userMessage = "Write a blog post about physical standards for letters";
-const templateUseCases = ["financial_report", "agentic_rag", "deep_research"];
+const vectorDb: TemplateVectorDB = process.env.VECTORDB
+  ? (process.env.VECTORDB as TemplateVectorDB)
+  : "none";
+const llamaCloudProjectName = "create-llama";
+const llamaCloudIndexName = "e2e-test";
+const allUseCases =
+  templateFramework === "nextjs"
+    ? ALL_TYPESCRIPT_USE_CASES
+    : ALL_PYTHON_USE_CASES;
+const isPythonLlamaDeploy = templateFramework === "fastapi";
 
-for (const useCase of templateUseCases) {
-  test.describe(`Test use case ${useCase} ${templateFramework} ${dataSource} ${templateUI} ${appType} ${templatePostInstallAction}`, async () => {
-    test.skip(
-      process.platform !== "linux" ||
-        process.env.DATASOURCE === "--no-files" ||
-        templateFramework === "express",
-      "The llamaindexserver template currently only works with nextjs, fastapi. We also only run on Linux to speed up tests.",
-    );
+const userMessage = "Write a blog post about physical standards for letters";
+
+for (const useCase of allUseCases) {
+  test.describe(`Test use case ${useCase} ${templateFramework} ${vectorDb}`, async () => {
     let port: number;
     let cwd: string;
     let name: string;
     let appProcess: ChildProcess;
-    // Only test without using vector db for now
-    const vectorDb = "none";
 
     test.beforeAll(async () => {
       port = Math.floor(Math.random() * 10000) + 10000;
       cwd = await createTestDir();
       const result = await runCreateLlama({
         cwd,
-        templateType: "llamaindexserver",
         templateFramework,
-        dataSource,
         vectorDb,
         port,
-        postInstallAction: templatePostInstallAction,
-        templateUI,
-        appType,
+        postInstallAction: isPythonLlamaDeploy ? "dependencies" : "runApp",
         useCase,
+        llamaCloudProjectName,
+        llamaCloudIndexName,
       });
       name = result.projectName;
       appProcess = result.appProcess;
@@ -61,9 +56,10 @@ for (const useCase of templateUseCases) {
 
     test("Frontend should have a title", async ({ page }) => {
       test.skip(
-        templatePostInstallAction !== "runApp" ||
-          templateFramework === "express",
+        isPythonLlamaDeploy,
+        "Skip frontend tests for Python LllamaDeploy",
       );
+
       await page.goto(`http://localhost:${port}`);
       await expect(page.getByText("Built by LlamaIndex")).toBeVisible({
         timeout: 5 * 60 * 1000,
@@ -74,11 +70,10 @@ for (const useCase of templateUseCases) {
       page,
     }) => {
       test.skip(
-        templatePostInstallAction !== "runApp" ||
-          useCase === "financial_report" ||
+        useCase === "financial_report" ||
           useCase === "deep_research" ||
-          templateFramework === "express",
-        "Skip chat tests for financial report and deep research.",
+          isPythonLlamaDeploy,
+        "Skip chat tests for financial report and deep research. Also skip for Python LlamaDeploy",
       );
       await page.goto(`http://localhost:${port}`);
       await page.fill("form textarea", userMessage);
